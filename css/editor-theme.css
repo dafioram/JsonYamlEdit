@@ -1,0 +1,61 @@
+/*
+ * Brace — editor-theme.css
+ * A CodeMirror theme (.cm-s-brace) matching app.css's token palette,
+ * so the raw editor doesn't look like a bolted-on third-party widget.
+ */
+
+.CodeMirror {
+  height: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.cm-s-brace.CodeMirror {
+  background: #14181F;
+  color: #E8EAF0;
+}
+
+.cm-s-brace .CodeMirror-gutters {
+  background: #1B2029;
+  border-right: 1px solid #2A3140;
+}
+
+.cm-s-brace .CodeMirror-linenumber {
+  color: #565F72;
+}
+
+.cm-s-brace .CodeMirror-cursor {
+  border-left: 1.5px solid #E0A84D;
+}
+
+.cm-s-brace div.CodeMirror-selected {
+  background: #2A3140;
+}
+
+.cm-s-brace .CodeMirror-matchingbracket {
+  color: #E0A84D !important;
+  font-weight: 700;
+}
+
+.cm-s-brace .cm-string { color: #9BCB7A; }
+.cm-s-brace .cm-number { color: #D3A6F0; }
+.cm-s-brace .cm-atom { color: #4FB8AE; }        /* true / false / null */
+.cm-s-brace .cm-property { color: #8FB4E3; }    /* JSON keys */
+.cm-s-brace .cm-string.cm-property { color: #8FB4E3; }
+.cm-s-brace .cm-keyword { color: #4FB8AE; }
+.cm-s-brace .cm-comment { color: #565F72; font-style: italic; }
+.cm-s-brace .cm-punctuation { color: #8890A0; }
+.cm-s-brace .cm-meta { color: #8890A0; }
+.cm-s-brace .cm-tag { color: #8FB4E3; }
+
+.cm-s-brace .CodeMirror-foldgutter-open,
+.cm-s-brace .CodeMirror-foldgutter-folded {
+  color: #565F72;
+  cursor: pointer;
+}
+
+.cm-error-line {
+  background: rgba(224, 96, 90, 0.14);
+}
+
+.brace-error-gutter { width: 4px; }

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Brace — JSON &amp; YAML workbench</title>
+<meta name="description" content="View, edit, and convert JSON and YAML files entirely in your browser. Nothing is uploaded anywhere.">
+<meta name="theme-color" content="#14181F">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+
+<link rel="stylesheet" href="lib/codemirror/codemirror.css">
+<link rel="stylesheet" href="lib/codemirror/addon/fold/foldgutter.css">
+<link rel="stylesheet" href="css/editor-theme.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">{}</span>
+    <span class="brand-name">Brace</span>
+  </div>
+
+  <div class="topbar-actions">
+    <button id="openFileBtn" type="button" class="btn">Open file</button>
+    <span id="formatBadge" class="format-badge" hidden></span>
+    <button id="convertBtn" type="button" class="btn" hidden>Convert</button>
+    <button id="downloadBtn" type="button" class="btn btn-accent" hidden>Download</button>
+    <button id="installBtn" type="button" class="btn" hidden title="Install Brace for offline use">Install app</button>
+  </div>
+</header>
+
+<main>
+  <!-- ============ Empty state ============ -->
+  <section id="emptyState" class="empty-state">
+    <div id="dropZone" class="drop-zone">
+      <div class="drop-zone-mark" aria-hidden="true">{ }</div>
+      <h1>Drop a JSON, YAML, or CSV file here</h1>
+      <p>Or paste JSON/YAML text anywhere on this page.</p>
+      <div class="drop-zone-buttons">
+        <button id="chooseFileBtn" type="button" class="btn btn-accent">Choose a file</button>
+        <button id="pasteBtn" type="button" class="btn">Paste from clipboard</button>
+      </div>
+      <p class="drop-zone-note">Everything happens in your browser — files never leave this device. Capped at 5&nbsp;MB for now, since the whole file is parsed at once. CSV files are converted to JSON on import.</p>
+      <p id="emptyError" class="empty-error" hidden></p>
+    </div>
+    <input id="fileInput" type="file" accept=".json,.yaml,.yml,.csv,.tsv,application/json,text/yaml,text/csv" hidden>
+  </section>
+
+  <!-- ============ App shell (hidden until something is loaded) ============ -->
+  <section id="appShell" class="app-shell" hidden>
+    <nav class="view-tabs">
+      <button id="tabraw" type="button" class="view-tab">Raw</button>
+      <button id="tabtree" type="button" class="view-tab active">Tree</button>
+      <span id="statusLine" class="status-line"></span>
+      <button id="issuesToggle" type="button" class="issues-toggle">Issues</button>
+    </nav>
+    <p id="appError" class="app-error" hidden></p>
+
+    <div class="view-and-panel">
+      <div class="main-column">
+
+        <div class="primary-split">
+          <div id="viewraw" class="view-pane" hidden>
+            <textarea id="editorTextarea"></textarea>
+          </div>
+
+          <div id="viewtree" class="view-pane">
+            <div class="tree-toolbar">
+              <input id="treeSearchInput" type="text" placeholder="Search keys and values…" class="text-input">
+              <button id="treeExpandAllBtn" type="button" class="btn btn-small">Expand all</button>
+              <button id="treeCollapseAllBtn" type="button" class="btn btn-small">Collapse all</button>
+            </div>
+            <div id="treeContainer" class="tree-container"></div>
+          </div>
+        </div>
+
+        <!-- Table is deliberately not part of the Raw/Tree tab switch — it
+             stays visible alongside whichever of those two is active. -->
+        <div id="viewtable" class="table-pane">
+          <div class="table-pane-header">
+            <button id="tableCollapseBtn" type="button" class="btn-icon" title="Collapse table">&#9662;</button>
+            <span class="table-pane-title">Table</span>
+            <span class="table-scope">Showing: <code id="tableScopeLabel">root</code>
+              <button id="tableScopeReset" type="button" class="btn btn-small" hidden>Reset to root</button>
+            </span>
+            <div id="tableToolbar" class="table-toolbar-controls">
+              <input id="tableFilterInput" type="text" placeholder="Filter rows…" class="text-input">
+              <button id="tableCsvBtn" type="button" class="btn btn-small">Export CSV</button>
+            </div>
+          </div>
+          <div id="tableBody" class="table-pane-body">
+            <div id="tableContainer" class="table-container"></div>
+            <div id="tablePopoverHost" class="popover-host"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <aside id="issuesPanel" class="issues-panel" hidden>
+        <div id="notesPanel" class="notes-panel" hidden>
+          <div class="notes-header">
+            <h2 id="notesTitle">Conversion notes</h2>
+            <button id="notesCloseBtn" type="button" class="btn-icon" aria-label="Dismiss">&times;</button>
+          </div>
+          <ul id="notesList"></ul>
+        </div>
+        <h2>Issues</h2>
+        <ul id="issuesList" class="issues-list"></ul>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<script src="lib/js-yaml.min.js"></script>
+<script src="lib/codemirror/codemirror.js"></script>
+<script src="lib/codemirror/mode/javascript/javascript.js"></script>
+<script src="lib/codemirror/mode/yaml/yaml.js"></script>
+<script src="lib/codemirror/addon/edit/matchbrackets.js"></script>
+<script src="lib/codemirror/addon/fold/foldcode.js"></script>
+<script src="lib/codemirror/addon/fold/foldgutter.js"></script>
+<script src="lib/codemirror/addon/fold/brace-fold.js"></script>
+<script src="lib/codemirror/addon/fold/indent-fold.js"></script>
+
+<script src="js/linter.js"></script>
+<script src="js/parser.js"></script>
+<script src="js/csv.js"></script>
+<script src="js/convert.js"></script>
+<script src="js/tree-view.js"></script>
+<script src="js/table-view.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
