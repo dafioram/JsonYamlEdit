@@ -14,9 +14,9 @@ a browser. Everything works this way *except* installing it as an offline
 app (see below).
 
 **For the PWA install prompt / offline support to work**, the browser
-requires the app to be served over `http://` or `https://`, not opened as
-a bare `file://` path — that's a browser security rule for service
-workers, not something specific to Brace. Any static file server works,
+requires HTTPS or a trusted local origin such as `http://localhost`. A
+plain `file://` tab can still open and edit documents. Any static file
+server works for local testing,
 for example, from this folder:
 
 ```bash
@@ -69,7 +69,7 @@ app" button once it appears.
   value silently wins in both formats, which is rarely what you meant) and
   YAML lines indented with tabs (invalid per the YAML spec). Issues are
   clickable and jump straight to the offending line in the Raw view.
-- **Installable / offline-capable** (PWA) once served over http(s) — see
+- **Installable / offline-capable** (PWA) on HTTPS or localhost — see
   above.
 
 ### Conversion notes: what YAML → JSON actually changes

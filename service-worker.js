@@ -1,15 +1,18 @@
 /*
  * Brace — service-worker.js
  *
- * Cache-first app shell so Brace works offline once installed. There's no
- * server component to talk to in the first place, so "offline" here just
- * means "loads from cache instead of disk on every visit."
+ * Cache-first app shell. Cache names include the registration scope so
+ * several static apps can share the same hosting origin.
  *
  * Bump CACHE_VERSION whenever any precached file changes so clients pick
  * up the new files instead of serving stale ones from a previous install.
+ * The unscoped legacy cache is deliberately left alone because another
+ * Brace copy on the same origin may still use it.
  */
 
-var CACHE_VERSION = "brace-v1";
+var CACHE_VERSION = "v2";
+var CACHE_PREFIX = "brace-shell:" + self.registration.scope + ":";
+var CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
 
 var PRECACHE_FILES = [
   "./",
@@ -19,6 +22,7 @@ var PRECACHE_FILES = [
   "css/editor-theme.css",
   "js/app.js",
   "js/convert.js",
+  "js/csv.js",
   "js/editor.js",
   "js/linter.js",
   "js/parser.js",
@@ -43,8 +47,11 @@ var PRECACHE_FILES = [
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then(function (cache) {
-      return cache.addAll(PRECACHE_FILES);
+    caches.open(CACHE_NAME).then(function (cache) {
+      var requests = PRECACHE_FILES.map(function (asset) {
+        return new Request(new URL(asset, self.registration.scope), { cache: "reload" });
+      });
+      return cache.addAll(requests);
     }).then(function () {
       return self.skipWaiting();
     })
@@ -55,7 +62,7 @@ self.addEventListener("activate", function (event) {
   event.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(
-        keys.filter(function (key) { return key !== CACHE_VERSION; })
+        keys.filter(function (key) { return key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME; })
             .map(function (key) { return caches.delete(key); })
       );
     }).then(function () {
@@ -66,21 +73,16 @@ self.addEventListener("activate", function (event) {
 
 self.addEventListener("fetch", function (event) {
   if (event.request.method !== "GET") return;
+  var scope = new URL(self.registration.scope);
+  var url = new URL(event.request.url);
+  if (url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
+  var relativePath = url.pathname.slice(scope.pathname.length);
+  var asset = relativePath || "./";
+  if (PRECACHE_FILES.indexOf(asset) === -1) return;
 
-  event.respondWith(
-    caches.match(event.request).then(function (cached) {
-      if (cached) return cached;
-      return fetch(event.request).then(function (response) {
-        // Opportunistically cache same-origin files fetched after install
-        // (e.g. if PRECACHE_FILES ever misses one) — never cache errors.
-        if (response && response.ok && event.request.url.indexOf(self.location.origin) === 0) {
-          var copy = response.clone();
-          caches.open(CACHE_VERSION).then(function (cache) { cache.put(event.request, copy); });
-        }
-        return response;
-      }).catch(function () {
-        return cached; // offline and not precached — nothing more we can do
-      });
-    })
-  );
+  event.respondWith(caches.open(CACHE_NAME).then(function (cache) {
+    return cache.match(event.request, { ignoreSearch: true }).then(function (cached) {
+      return cached || fetch(event.request);
+    });
+  }));
 });
