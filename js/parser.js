@@ -53,8 +53,36 @@
     };
   }
 
+  function inspectData(value) {
+    var ancestors = new Set();
+    var nodes = 0;
+    var characters = 0;
+
+    function visit(item, depth) {
+      if (++nodes > 100000 || depth > 128 || characters > 16 * 1024 * 1024) {
+        return "The parsed data exceeds Brace's size or nesting limit.";
+      }
+      if (typeof item === "string") characters += item.length;
+      if (item === null || typeof item !== "object") return null;
+      if (ancestors.has(item)) return "This YAML contains a self-referencing alias.";
+      ancestors.add(item);
+      for (var key in item) {
+        if (!Object.prototype.hasOwnProperty.call(item, key)) continue;
+        characters += key.length;
+        var error = visit(item[key], depth + 1);
+        if (error) return error;
+      }
+      ancestors.delete(item);
+      return null;
+    }
+
+    return visit(value, 0) || (characters > 16 * 1024 * 1024
+      ? "The parsed data exceeds Brace's size or nesting limit." : null);
+  }
+
   Brace.parser = {
     normalizeError: normalizeError,
+    inspectData: inspectData,
     MAX_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB — see README for rationale
 
     // Tries JSON first (strict, fast, unambiguous), then falls back to YAML

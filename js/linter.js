@@ -174,7 +174,7 @@
     var yaml = global.jsyaml;
     if (!yaml) return issues;
 
-    var MAX_PASSES = 50;
+    var MAX_PASSES = Math.max(1, Math.min(50, Math.floor(1000000 / working.length)));
     for (var pass = 0; pass < MAX_PASSES; pass++) {
       try {
         yaml.loadAll(working);

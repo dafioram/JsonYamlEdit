@@ -12,6 +12,9 @@
 
   var Brace = global.Brace = global.Brace || {};
   var typeOf = Brace.treeView.typeOf;
+  var ROW_PAGE_SIZE = 100;
+  var COLUMN_PAGE_SIZE = 50;
+  var MAX_CSV_CELLS = 1000000;
 
   function collectColumns(rows) {
     var seen = new Set();
@@ -55,6 +58,8 @@
     this.sortCol = null;
     this.sortDir = 0; // 0 none, 1 asc, -1 desc
     this.filterTerm = "";
+    this.rowPage = 0;
+    this.columnPage = 0;
     this.onOutsidePopoverClick = null;
   }
 
@@ -64,11 +69,13 @@
     this.sortCol = null;
     this.sortDir = 0;
     this.filterTerm = "";
+    this.rowPage = this.columnPage = 0;
     this.renderAll();
   };
 
   TableView.prototype.setFilter = function (term) {
     this.filterTerm = term || "";
+    this.rowPage = 0;
     this.renderAll();
   };
 
@@ -87,7 +94,7 @@
         return false;
       });
     }
-    if (this.sortCol && this.sortDir !== 0) {
+    if (this.sortCol !== null && this.sortDir !== 0) {
       var col = this.sortCol, dir = this.sortDir;
       rows = rows.slice().sort(function (a, b) {
         var av = cellSortValue(a[col]), bv = cellSortValue(b[col]);
@@ -97,6 +104,25 @@
       });
     }
     return rows;
+  };
+
+  TableView.prototype._renderPager = function (label, count, size, page, onChange) {
+    if (count <= size) return;
+    var pager = document.createElement("div");
+    pager.className = "table-pager";
+    var labelEl = document.createElement("span");
+    labelEl.textContent = label + " " + (page * size + 1) + "–" + Math.min(count, (page + 1) * size) + " of " + count;
+    pager.appendChild(labelEl);
+    [-1, 1].forEach(function (step) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn btn-small";
+      button.textContent = (step < 0 ? "Previous " : "Next ") + label.toLowerCase();
+      button.disabled = step < 0 ? page === 0 : (page + 1) * size >= count;
+      button.addEventListener("click", function () { onChange(page + step); });
+      pager.appendChild(button);
+    });
+    this.container.appendChild(pager);
   };
 
   TableView.prototype.renderAll = function () {
@@ -110,22 +136,38 @@
     summary.textContent = visibleRows.length + " row" + (visibleRows.length === 1 ? "" : "s") +
       " \u00B7 " + this.columns.length + " column" + (this.columns.length === 1 ? "" : "s");
     this.container.appendChild(summary);
+    this._renderPager("Rows", visibleRows.length, ROW_PAGE_SIZE, this.rowPage, function (page) {
+      self.rowPage = page;
+      self.renderAll();
+    });
+    this._renderPager("Columns", this.columns.length, COLUMN_PAGE_SIZE, this.columnPage, function (page) {
+      self.columnPage = page;
+      self.renderAll();
+    });
+    var shownRows = visibleRows.slice(this.rowPage * ROW_PAGE_SIZE, (this.rowPage + 1) * ROW_PAGE_SIZE);
+    var shownColumns = this.columns.slice(this.columnPage * COLUMN_PAGE_SIZE, (this.columnPage + 1) * COLUMN_PAGE_SIZE);
 
     var table = document.createElement("table");
     table.className = "data-table";
 
     var thead = document.createElement("thead");
     var headRow = document.createElement("tr");
-    this.columns.forEach(function (col) {
+    shownColumns.forEach(function (col) {
       var th = document.createElement("th");
-      th.textContent = col;
+      th.scope = "col";
+      var sortButton = document.createElement("button");
+      sortButton.type = "button";
+      sortButton.className = "table-sort";
+      sortButton.textContent = col || "(empty key)";
+      th.appendChild(sortButton);
       var arrow = document.createElement("span");
       arrow.className = "sort-arrow";
       if (self.sortCol === col && self.sortDir !== 0) {
         arrow.textContent = self.sortDir === 1 ? " \u2191" : " \u2193";
       }
-      th.appendChild(arrow);
-      th.addEventListener("click", function () {
+      sortButton.appendChild(arrow);
+      if (self.sortCol === col && self.sortDir) th.setAttribute("aria-sort", self.sortDir === 1 ? "ascending" : "descending");
+      sortButton.addEventListener("click", function () {
         if (self.sortCol !== col) {
           self.sortCol = col;
           self.sortDir = 1;
@@ -137,6 +179,7 @@
         } else {
           self.sortDir = 1;
         }
+        self.rowPage = 0;
         self.renderAll();
       });
       headRow.appendChild(th);
@@ -145,9 +188,9 @@
     table.appendChild(thead);
 
     var tbody = document.createElement("tbody");
-    visibleRows.forEach(function (row) {
+    shownRows.forEach(function (row) {
       var tr = document.createElement("tr");
-      self.columns.forEach(function (col) {
+      shownColumns.forEach(function (col) {
         var td = document.createElement("td");
         var has = Object.prototype.hasOwnProperty.call(row, col);
         var value = row[col];
@@ -233,6 +276,9 @@
 
   TableView.prototype.toCSV = function () {
     var rows = this._filteredSortedRows();
+    if (rows.length * this.columns.length > MAX_CSV_CELLS) {
+      throw new Error("This CSV would exceed one million cells. Filter the rows before exporting.");
+    }
     var lines = [this.columns.map(csvEscape).join(",")];
     rows.forEach(function (row) {
       lines.push(this.columns.map(function (col) { return csvEscape(row[col]); }).join(","));

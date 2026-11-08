@@ -2,16 +2,16 @@
  * Brace — tree-view.js
  *
  * A collapsible tree renderer for arbitrary JSON-like data. Children are
- * only built into the DOM the first time a node is expanded, so opening a
- * large file doesn't pay to render everything up front — only "Expand all"
- * does, and that's gated behind a node-count warning for very large trees.
+ * built in batches as nodes expand, with a cap on total rendered rows.
  */
 (function (global) {
   "use strict";
 
   var Brace = global.Brace = global.Brace || {};
 
-  var EXPAND_ALL_WARN_THRESHOLD = 4000;
+  var MAX_TREE_ROWS = 4000;
+  var CHILD_BATCH_SIZE = 100;
+  var MAX_SEARCH_MATCHES = 100;
   var STRING_TRUNCATE_LENGTH = 140;
 
   function typeOf(value) {
@@ -22,36 +22,13 @@
     return t; // "string" | "number" | "boolean"
   }
 
-  function countDescendants(value) {
-    var count = 0;
-    var type = typeOf(value);
-    if (type === "object") {
-      for (var k in value) {
-        if (Object.prototype.hasOwnProperty.call(value, k)) {
-          count += 1 + countDescendants(value[k]);
-        }
-      }
-    } else if (type === "array") {
-      for (var i = 0; i < value.length; i++) {
-        count += 1 + countDescendants(value[i]);
-      }
-    }
-    return count;
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
   function formatPath(segments) {
     var out = "root";
     for (var i = 0; i < segments.length; i++) {
       var seg = segments[i];
-      out += seg.type === "index" ? "[" + seg.index + "]" : "." + seg.name;
+      if (seg.type === "index") out += "[" + seg.index + "]";
+      else if (/^[A-Za-z_$][\w$]*$/.test(seg.name)) out += "." + seg.name;
+      else out += "[" + JSON.stringify(seg.name) + "]";
     }
     return out;
   }
@@ -83,51 +60,49 @@
     this.container = container;
     this.options = options || {};
     this.rootData = null;
-    this.matchSet = null; // Set of path-strings that must stay visible during search
-    this.matchSegPaths = null; // array of segment-arrays, for building ancestor chains
+    this.searchPaths = null;
   }
 
   TreeView.prototype.render = function (data, rootLabel) {
     this.rootData = data;
     this._lastRootLabel = rootLabel;
-    this.matchSet = null;
-    this.container.innerHTML = "";
-    this._nodeCount = countDescendants(data);
+    this.searchPaths = null;
+    this._renderRoot();
+  };
 
-    var root = this._buildNode(rootLabel || "root", data, [], 0, true);
+  TreeView.prototype._renderRoot = function () {
+    this.container.replaceChildren();
+    this.rowCount = 0;
+    this.limitNote = null;
+    var root = this._buildNode(this._lastRootLabel || "root", this.rootData, [], 0, true);
     this._rootNodeResult = root;
     this.container.appendChild(root.row);
     if (root.childrenContainer) {
       this.container.appendChild(root.childrenContainer);
-      if (root.expandFn) root.expandFn(true); // auto-expand first level for orientation
+      root.expandFn(true);
     }
+  };
+
+  TreeView.prototype._showLimit = function () {
+    if (this.limitNote) return;
+    this.limitNote = document.createElement("div");
+    this.limitNote.className = "tree-empty-note";
+    this.limitNote.textContent = "Tree display limit reached. Search for a narrower branch or collapse all to reset.";
+    this.container.prepend(this.limitNote);
   };
 
   TreeView.prototype.expandAll = function () {
-    if (this._nodeCount > EXPAND_ALL_WARN_THRESHOLD) {
-      var ok = global.confirm(
-        "This tree has about " + this._nodeCount.toLocaleString() +
-        " nodes. Expanding all of them may be slow. Continue?"
-      );
-      if (!ok) return;
+    function expand(node) {
+      if (!node || !node.expandFn) return;
+      node.expandFn(true, true).forEach(expand);
     }
-    this._walkAndToggle(this._rootNodeResult, true);
+    expand(this._rootNodeResult);
   };
 
   TreeView.prototype.collapseAll = function () {
-    this._walkAndToggle(this._rootNodeResult, false);
-  };
-
-  // Recurses through actual node-result references (not a DOM query
-  // snapshot) so it correctly reaches children built as a result of this
-  // very call, at any depth.
-  TreeView.prototype._walkAndToggle = function (nodeResult, open) {
-    if (!nodeResult || !nodeResult.expandFn) return;
-    nodeResult.expandFn(open);
-    var kids = nodeResult.childrenContainer && nodeResult.childrenContainer._childResults;
-    if (kids) {
-      for (var i = 0; i < kids.length; i++) this._walkAndToggle(kids[i], open);
-    }
+    if (!this._rootNodeResult) return;
+    this._renderRoot();
+    if (this._rootNodeResult.expandFn) this._rootNodeResult.expandFn(false);
   };
 
   // Builds one row + (if expandable) a lazy children container. Returns
@@ -137,15 +112,20 @@
     var self = this;
     var type = typeOf(value);
     var expandable = type === "object" || type === "array";
+    this.rowCount++;
 
     var row = document.createElement("div");
     row.className = "tree-row";
     row.style.paddingLeft = (depth * 18 + 6) + "px";
 
-    var toggle = document.createElement("span");
+    var toggle = document.createElement(expandable ? "button" : "span");
     toggle.className = "tree-toggle";
     toggle.textContent = expandable ? "\u25B8" : "\u00A0";
-    if (expandable) toggle.setAttribute("data-expandable", "1");
+    if (expandable) {
+      toggle.type = "button";
+      toggle.setAttribute("data-expandable", "1");
+      toggle.setAttribute("aria-label", "Toggle " + label);
+    }
     row.appendChild(toggle);
 
     var keyEl = document.createElement("span");
@@ -174,16 +154,50 @@
       childrenContainer.className = "tree-children";
       childrenContainer.hidden = true;
 
-      doExpand = function (open) {
+      var results = [];
+      var keys = null;
+      var nextIndex = 0;
+      var more = document.createElement("button");
+      more.type = "button";
+      more.className = "btn btn-small tree-more";
+      more.textContent = "Show more";
+
+      function appendChildren(limit) {
+        if (more.parentNode) more.remove();
+        var isArray = type === "array";
+        var visible = self.searchPaths && self.searchPaths.get(formatPath(segments));
+        if (!keys && (visible || self.searchPaths || !isArray)) {
+          keys = visible ? Array.from(visible) : self.searchPaths ? [] : Object.keys(value);
+        }
+        var count = keys ? keys.length : value.length;
+        var batch = document.createDocumentFragment();
+        while (nextIndex < count && limit > 0 && self.rowCount < MAX_TREE_ROWS) {
+          var key = keys ? keys[nextIndex] : nextIndex;
+          var segment = isArray ? { type: "index", index: key } : { type: "key", name: key };
+          var child = self._buildNode(key + ":", value[key], segments.concat(segment), depth + 1, false);
+          batch.appendChild(child.row);
+          if (child.childrenContainer) batch.appendChild(child.childrenContainer);
+          results.push(child);
+          nextIndex++;
+          limit--;
+        }
+        childrenContainer.appendChild(batch);
+        if (nextIndex < count) {
+          if (self.rowCount < MAX_TREE_ROWS) childrenContainer.appendChild(more);
+          else self._showLimit();
+        }
+      }
+
+      more.addEventListener("click", function () { appendChildren(CHILD_BATCH_SIZE); });
+      doExpand = function (open, all) {
         expanded = open;
         toggle.textContent = open ? "\u25BE" : "\u25B8";
+        toggle.setAttribute("aria-expanded", String(open));
         childrenContainer.hidden = !open;
-        if (open && !childrenContainer._built) {
-          childrenContainer._childResults = self._populateChildren(childrenContainer, value, segments, depth + 1, type);
-          childrenContainer._built = true;
-        }
+        if (open && (nextIndex === 0 || all)) appendChildren(all ? MAX_TREE_ROWS : CHILD_BATCH_SIZE);
+        return results;
       };
-      toggle._braceToggle = doExpand;
+      toggle.setAttribute("aria-expanded", "false");
       toggle.addEventListener("click", function () { doExpand(!expanded); });
       row.addEventListener("dblclick", function (e) {
         if (e.target === toggle) return;
@@ -231,33 +245,6 @@
     return { row: row, childrenContainer: childrenContainer, expandFn: doExpand };
   };
 
-  // Returns an array of child node-results (not just DOM nodes) so callers
-  // like expandAll can recurse into structure that was just lazily built,
-  // rather than re-querying a DOM snapshot that wouldn't include it yet.
-  TreeView.prototype._populateChildren = function (container, value, parentSegments, depth, parentType) {
-    var results = [];
-    if (parentType === "array") {
-      for (var i = 0; i < value.length; i++) {
-        var segs = parentSegments.concat([{ type: "index", index: i }]);
-        var child = this._buildNode(String(i) + ":", value[i], segs, depth, false);
-        container.appendChild(child.row);
-        if (child.childrenContainer) container.appendChild(child.childrenContainer);
-        results.push(child);
-      }
-    } else {
-      var keys = Object.keys(value);
-      for (var k = 0; k < keys.length; k++) {
-        var key = keys[k];
-        var segs2 = parentSegments.concat([{ type: "key", name: key }]);
-        var child2 = this._buildNode(key + ":", value[key], segs2, depth, false);
-        container.appendChild(child2.row);
-        if (child2.childrenContainer) container.appendChild(child2.childrenContainer);
-        results.push(child2);
-      }
-    }
-    return results;
-  };
-
   TreeView.prototype._formatScalar = function (value, type) {
     if (type === "string") {
       var s = value.length > STRING_TRUNCATE_LENGTH ? value.slice(0, STRING_TRUNCATE_LENGTH) + "\u2026" : value;
@@ -267,111 +254,65 @@
     return String(value);
   };
 
-  // ---- Search --------------------------------------------------------
-  // Full re-render showing only paths that lead to a match (key name or
-  // scalar value containing the search term, case-insensitive). Given the
-  // file-size cap this is a full walk + full render, which is fine.
   TreeView.prototype.search = function (term) {
     if (!term) {
       this.render(this.rootData, this._lastRootLabel);
       return;
     }
     var needle = term.toLowerCase();
-    var matchedSegPaths = [];
+    var paths = new Map();
+    var matches = 0;
+    var truncated = false;
 
-    (function walk(value, segments) {
-      var type = typeOf(value);
-      if (type === "object") {
-        for (var k in value) {
-          if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
-          var childSegs = segments.concat([{ type: "key", name: k }]);
-          if (k.toLowerCase().indexOf(needle) !== -1) matchedSegPaths.push(childSegs);
-          walk(value[k], childSegs);
-        }
-      } else if (type === "array") {
-        for (var i = 0; i < value.length; i++) {
-          var childSegs2 = segments.concat([{ type: "index", index: i }]);
-          walk(value[i], childSegs2);
-        }
-      } else {
-        var strVal = type === "null" ? "null" : String(value);
-        if (strVal.toLowerCase().indexOf(needle) !== -1) matchedSegPaths.push(segments);
+    function addMatch(segments) {
+      matches++;
+      var prefix = [];
+      segments.forEach(function (segment) {
+        var path = formatPath(prefix);
+        if (!paths.has(path)) paths.set(path, new Set());
+        paths.get(path).add(segment.type === "index" ? segment.index : segment.name);
+        prefix.push(segment);
+      });
+    }
+
+    function walk(value, segments, keyMatch) {
+      if (matches >= MAX_SEARCH_MATCHES) {
+        truncated = true;
+        return;
       }
-    })(this.rootData, []);
+      var type = typeOf(value);
+      var branch = type === "object" || type === "array";
+      if (keyMatch || (!branch && String(value).toLowerCase().includes(needle))) addMatch(segments);
+      if (!branch) return;
+      for (var key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        if (matches >= MAX_SEARCH_MATCHES) {
+          truncated = true;
+          break;
+        }
+        var segment = type === "array" ? { type: "index", index: Number(key) } : { type: "key", name: key };
+        walk(value[key], segments.concat(segment), type === "object" && key.toLowerCase().includes(needle));
+      }
+    }
 
-    this.container.innerHTML = "";
-    if (matchedSegPaths.length === 0) {
+    walk(this.rootData, [], false);
+    this.searchPaths = paths;
+    if (matches === 0) {
+      this._rootNodeResult = null;
       var empty = document.createElement("div");
       empty.className = "tree-empty-note";
       empty.textContent = 'No keys or values match "' + term + '".';
-      this.container.appendChild(empty);
+      this.container.replaceChildren(empty);
       return;
     }
-
-    // Build a prefix-tree of segment paths that must be expanded/visible.
-    var visiblePrefixes = new Set(["root"]);
-    matchedSegPaths.forEach(function (segs) {
-      var acc = "root";
-      segs.forEach(function (seg) {
-        acc += seg.type === "index" ? "[" + seg.index + "]" : "." + seg.name;
-        visiblePrefixes.add(acc);
-      });
-    });
-
-    var root = this._buildFilteredNode("root", this.rootData, [], 0, true, visiblePrefixes, "root");
-    this._rootNodeResult = root;
-    this.container.appendChild(root.row);
-    if (root.childrenContainer) this.container.appendChild(root.childrenContainer);
-  };
-
-  TreeView.prototype._buildFilteredNode = function (label, value, segments, depth, isRoot, visiblePrefixes, pathStr) {
-    var node = this._buildNode(label, value, segments, depth, isRoot);
-    if (node.childrenContainer) {
-      var self = this;
-      var type = typeOf(value);
-      var toggleEl = node.row.querySelector(".tree-toggle");
-
-      // Override lazy population to only include children on a visible
-      // prefix, and keep expandFn / _childResults in sync so expandAll /
-      // collapseAll (which recurse via those, not via DOM queries) still
-      // work correctly on a filtered tree.
-      var filteredExpand = function (open) {
-        node.childrenContainer.hidden = !open;
-        toggleEl.textContent = open ? "\u25BE" : "\u25B8";
-        if (open && !node.childrenContainer._built) {
-          var results = [];
-          if (type === "array") {
-            for (var i = 0; i < value.length; i++) {
-              var childPath = pathStr + "[" + i + "]";
-              if (!visiblePrefixes.has(childPath)) continue;
-              var segs = segments.concat([{ type: "index", index: i }]);
-              var child = self._buildFilteredNode(i + ":", value[i], segs, depth + 1, false, visiblePrefixes, childPath);
-              node.childrenContainer.appendChild(child.row);
-              if (child.childrenContainer) node.childrenContainer.appendChild(child.childrenContainer);
-              results.push(child);
-            }
-          } else {
-            var keys = Object.keys(value);
-            for (var k = 0; k < keys.length; k++) {
-              var key = keys[k];
-              var childPath2 = pathStr + "." + key;
-              if (!visiblePrefixes.has(childPath2)) continue;
-              var segs2 = segments.concat([{ type: "key", name: key }]);
-              var child2 = self._buildFilteredNode(key + ":", value[key], segs2, depth + 1, false, visiblePrefixes, childPath2);
-              node.childrenContainer.appendChild(child2.row);
-              if (child2.childrenContainer) node.childrenContainer.appendChild(child2.childrenContainer);
-              results.push(child2);
-            }
-          }
-          node.childrenContainer._childResults = results;
-          node.childrenContainer._built = true;
-        }
-      };
-      toggleEl._braceToggle = filteredExpand;
-      node.expandFn = filteredExpand;
-      filteredExpand(true); // auto-expand every node on a visible-prefix chain
+    this._renderRoot();
+    this.expandAll();
+    if (truncated) {
+      var notice = document.createElement("div");
+      notice.className = "tree-empty-note";
+      notice.textContent = "Showing the first " + MAX_SEARCH_MATCHES + " matches.";
+      this.container.prepend(notice);
     }
-    return node;
   };
 
   Brace.treeView = {

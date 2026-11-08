@@ -669,3 +669,19 @@ dialog textarea {
 
 .topbar-actions, .view-tabs { flex-wrap: wrap; }
 select.btn { color-scheme: dark; }
+
+.tree-toggle[data-expandable], .table-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.tree-more { margin: 4px 12px; }
+.table-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 10px;
+}

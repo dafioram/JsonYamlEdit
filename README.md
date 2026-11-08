@@ -103,11 +103,9 @@ model than JSON and the preview calls out common representation changes.
 
 - **5 MB file size cap.** Brace parses the entire file in memory in your
   browser — there's no server to hand off the heavy lifting to, and no
-  streaming/partial parser (JSON and YAML aren't byte-seekable formats the
-  way CSV is, so this would be a much bigger undertaking). 5 MB comfortably
-  covers hand-written configs, API responses, and most data exports; if
-  you need bigger, a proper desktop tool with a streaming parser is the
-  better fit for now.
+  streaming parser. Tree and Table are bounded by depth and expanded node
+  count. YAML with cyclic aliases stays available in Raw. Tables page both
+  rows and columns, and CSV exports are capped at one million cells.
 - **Tree/Table are read-only views.** Editing happens in the Raw view;
   Tree and Table are for navigating and understanding the data. (Click
   "copy path" on a tree node to quickly locate it in the raw text.)

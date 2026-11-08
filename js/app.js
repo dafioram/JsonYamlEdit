@@ -20,6 +20,7 @@
     isMultiDoc: false,
     lintIssues: [],
     parseError: null,
+    viewError: null,
     currentView: "tree",
     tableScope: null, // { segments, pathStr } | null
     fileName: null,
@@ -191,21 +192,22 @@
   }
 
   function runLintAndRender() {
-    state.lintIssues = state.parseError ? [] : window.Brace.parser.lint(state.rawText, state.format);
+    state.viewError = state.parseError ? null : window.Brace.parser.inspectData(state.data);
+    state.lintIssues = state.parseError || state.viewError ? [] : window.Brace.parser.lint(state.rawText, state.format);
     renderStatusLine();
     renderIssuesPanel();
     renderFormatBadge();
-    el.convertBtn.disabled = el.formatBtn.disabled = !!state.parseError;
+    var unavailable = !!(state.parseError || state.viewError);
+    el.convertBtn.disabled = unavailable;
+    el.formatBtn.disabled = !!state.parseError || (!!state.viewError && state.format === "yaml");
+    el.treeSearchInput.disabled = el.treeExpandAllBtn.disabled = el.treeCollapseAllBtn.disabled = unavailable;
 
-    el.treeSearchInput.disabled = el.treeExpandAllBtn.disabled = el.treeCollapseAllBtn.disabled = !!state.parseError;
-    if (state.parseError) {
-      renderTreeOrTableUnavailable("There's a syntax error in the raw text — fix it to see the tree and table views again.");
+    if (unavailable) {
+      var message = state.viewError || "Fix the syntax error in Raw to see the tree and table views again.";
+      renderTreeOrTableUnavailable(message);
       return;
     }
 
-    // Table is a persistent pane (not a tab), so it must stay in sync on
-    // every load/edit/convert regardless of which of Raw/Tree is active —
-    // otherwise it goes stale the moment it's not the focused tab.
     renderTable();
     if (state.currentView === "tree") renderTree();
   }
@@ -224,6 +226,11 @@
     if (state.parseError) {
       el.statusLine.textContent = "Syntax error" + (state.parseError.line ? " on line " + state.parseError.line : "");
       el.statusLine.className = "status-line status-error";
+      return;
+    }
+    if (state.viewError) {
+      el.statusLine.textContent = "Raw only";
+      el.statusLine.className = "status-line status-warn";
       return;
     }
     var n = state.lintIssues.length;
@@ -245,7 +252,9 @@
 
   function renderIssuesPanel() {
     el.issuesList.innerHTML = "";
-    var issues = state.parseError ? [{ severity: "error", message: state.parseError.message, line: state.parseError.line }] : state.lintIssues;
+    var issues = state.lintIssues;
+    if (state.parseError) issues = [{ severity: "error", message: state.parseError.message, line: state.parseError.line }];
+    else if (state.viewError) issues = [{ severity: "warning", message: state.viewError }];
     el.issuesToggle.textContent = "Issues" + (issues.length ? " (" + issues.length + ")" : "");
     el.issuesToggle.classList.toggle("has-issues", issues.length > 0);
 
@@ -378,7 +387,7 @@
       el["view" + v].hidden = v !== view;
     });
     if (view === "raw") editor.refresh();
-    else if (!state.parseError && state.hasLoadedOnce) renderTree();
+    else if (!state.parseError && !state.viewError && state.hasLoadedOnce) renderTree();
   }
 
   // ---- Editor sync -------------------------------------------------------
@@ -533,7 +542,7 @@
     el.convertBtn.addEventListener("click", function () {
       clearLoadProblem();
       flushEditor();
-      if (state.parseError) return;
+      if (state.parseError || state.viewError) return;
 
       try {
         var converter = window.Brace.convert;
@@ -564,7 +573,7 @@
     el.formatBtn.addEventListener("click", function () {
       clearLoadProblem();
       flushEditor();
-      if (state.parseError) return;
+      if (state.parseError || (state.viewError && state.format === "yaml")) return;
       try {
         var converter = window.Brace.convert;
         if (state.format === "json") {
@@ -649,7 +658,14 @@
     el.tableCsvBtn.addEventListener("click", function () {
       flushEditor();
       if (!tableView) return;
-      var csv = tableView.toCSV();
+      var csv;
+      clearLoadProblem();
+      try {
+        csv = tableView.toCSV();
+      } catch (err) {
+        reportLoadProblem(err.message);
+        return;
+      }
       var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
