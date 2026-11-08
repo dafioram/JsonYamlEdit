@@ -49,7 +49,7 @@ app" button once it appears.
   and code folding (CodeMirror), fully editable — this is the one place
   edits actually happen; Tree and Table are for browsing.
 - **Tree view**: collapsible nesting, a key/item count badge on every
-  object and array, search (auto-expands and highlights matching
+  object and array, search (shows and auto-expands matching
   branches), expand-all / collapse-all, and a "copy path" button on every
   node.
 - **Table view**: a persistent pane, not a tab — it stays visible
@@ -137,12 +137,19 @@ lib/                       vendored js-yaml + CodeMirror 5 (no CDN)
 icons/                     PWA icons
 ```
 
-## A note on testing
+## Testing
 
-The core logic (format detection, parsing, duplicate-key linting,
-conversion, and the tree/table rendering logic) was unit-tested directly
-in Node and via a jsdom-based DOM smoke test during development. What
-*wasn't* possible to test in this environment was a real browser run —
-so give the actual drag-and-drop, CodeMirror editing feel, and PWA
-install prompt a check in your browser of choice before relying on it for
-anything important, and let me know if anything looks off.
+The app itself still runs from `index.html` without a build or install.
+To run the development checks with Node.js 24:
+
+```bash
+npm ci
+npx playwright install chromium
+npm test
+```
+
+GitHub Actions runs the Node unit tests and the Playwright Chromium tests
+on pushes and pull requests. Browser checks cover direct file access,
+document repair, conversion, exports, and a fresh service worker running
+offline from a project subpath. On Linux, add `--with-deps` to the
+Playwright install command if your system needs browser dependencies.
