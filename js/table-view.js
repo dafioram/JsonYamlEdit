@@ -55,6 +55,7 @@
     this.sortCol = null;
     this.sortDir = 0; // 0 none, 1 asc, -1 desc
     this.filterTerm = "";
+    this.onOutsidePopoverClick = null;
   }
 
   TableView.prototype.setData = function (rows) {
@@ -100,6 +101,7 @@
 
   TableView.prototype.renderAll = function () {
     var self = this;
+    this.closePopover();
     this.container.innerHTML = "";
 
     var summary = document.createElement("div");
@@ -190,9 +192,18 @@
     td.textContent = type === "string" ? value : String(value);
   };
 
+  TableView.prototype.closePopover = function () {
+    if (this.onOutsidePopoverClick) {
+      document.removeEventListener("click", this.onOutsidePopoverClick);
+      this.onOutsidePopoverClick = null;
+    }
+    this.popoverHost.replaceChildren();
+  };
+
   TableView.prototype._showPopover = function (anchorEl, value) {
+    var self = this;
     var host = this.popoverHost;
-    host.innerHTML = "";
+    this.closePopover();
     var pop = document.createElement("div");
     pop.className = "cell-popover";
     var rect = anchorEl.getBoundingClientRect();
@@ -203,7 +214,8 @@
     closeBtn.className = "cell-popover-close";
     closeBtn.type = "button";
     closeBtn.textContent = "\u00D7";
-    closeBtn.addEventListener("click", function () { host.innerHTML = ""; });
+    closeBtn.setAttribute("aria-label", "Close cell preview");
+    closeBtn.addEventListener("click", function () { self.closePopover(); });
     pop.appendChild(closeBtn);
 
     var treeContainer = document.createElement("div");
@@ -211,16 +223,12 @@
     host.appendChild(pop);
 
     var tv = Brace.treeView.create(treeContainer, {});
-    tv.render(value, typeOf(value) === "array" ? "value" : "value");
+    tv.render(value, "value");
 
-    setTimeout(function () {
-      document.addEventListener("click", function onDocClick(e) {
-        if (!pop.contains(e.target) && e.target !== anchorEl) {
-          host.innerHTML = "";
-          document.removeEventListener("click", onDocClick);
-        }
-      });
-    }, 0);
+    this.onOutsidePopoverClick = function (e) {
+      if (!pop.contains(e.target) && !anchorEl.contains(e.target)) self.closePopover();
+    };
+    document.addEventListener("click", this.onOutsidePopoverClick);
   };
 
   TableView.prototype.toCSV = function () {

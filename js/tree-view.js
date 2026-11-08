@@ -60,7 +60,11 @@
     var cur = data;
     for (var i = 0; i < segments.length; i++) {
       var seg = segments[i];
-      cur = seg.type === "index" ? cur[seg.index] : cur[seg.name];
+      if (cur === null || typeof cur !== "object") return undefined;
+      if ((seg.type === "index") !== Array.isArray(cur)) return undefined;
+      var key = seg.type === "index" ? seg.index : seg.name;
+      if (!Object.prototype.hasOwnProperty.call(cur, key)) return undefined;
+      cur = cur[key];
     }
     return cur;
   }

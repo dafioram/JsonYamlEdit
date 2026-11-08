@@ -197,6 +197,7 @@
     renderFormatBadge();
     el.convertBtn.disabled = el.formatBtn.disabled = !!state.parseError;
 
+    el.treeSearchInput.disabled = el.treeExpandAllBtn.disabled = el.treeCollapseAllBtn.disabled = !!state.parseError;
     if (state.parseError) {
       renderTreeOrTableUnavailable("There's a syntax error in the raw text — fix it to see the tree and table views again.");
       return;
@@ -298,13 +299,14 @@
   }
 
   function renderTreeOrTableUnavailable(message) {
+    treeView = null;
     el.treeContainer.innerHTML = "";
     var p1 = document.createElement("div");
     p1.className = "tree-empty-note";
     p1.textContent = message;
     el.treeContainer.appendChild(p1);
 
-    el.tableContainer.innerHTML = "";
+    clearTableView();
     var p2 = document.createElement("div");
     p2.className = "table-empty-note";
     p2.textContent = message;
@@ -323,12 +325,20 @@
     el.treeSearchInput.value = "";
   }
 
+  function clearTableView() {
+    if (tableView) tableView.closePopover();
+    tableView = null;
+    el.tableContainer.replaceChildren();
+    el.tableToolbar.hidden = true;
+  }
+
   function renderTable() {
+    clearTableView();
     var scopedData = state.data;
     var scopeLabel = "root";
     if (state.tableScope) {
       var resolved = window.Brace.treeView.resolvePath(state.data, state.tableScope.segments);
-      if (resolved === undefined) {
+      if (!window.Brace.tableView.isCandidate(resolved)) {
         state.tableScope = null; // path no longer valid (e.g. after an edit) — fall back to root
       } else {
         scopedData = resolved;
@@ -340,14 +350,12 @@
     el.tableScopeReset.hidden = !state.tableScope;
 
     if (!window.Brace.tableView.isCandidate(scopedData)) {
-      el.tableContainer.innerHTML = "";
       var note = document.createElement("div");
       note.className = "table-empty-note";
       note.textContent = window.Brace.treeView.typeOf(scopedData) === "array"
         ? "This array mixes objects with other value types, so it can't be shown as a table. Try the Tree view instead."
         : "Pick \u25A6 Table next to an array of objects in the Tree view to inspect it here.";
       el.tableContainer.appendChild(note);
-      el.tableToolbar.hidden = true;
       return;
     }
 
@@ -615,7 +623,10 @@
 
   function wireTabs() {
     el.tabraw.addEventListener("click", function () { setView("raw"); });
-    el.tabtree.addEventListener("click", function () { setView("tree"); });
+    el.tabtree.addEventListener("click", function () {
+      flushEditor();
+      setView("tree");
+    });
   }
 
   function wireTreeToolbar() {
@@ -636,6 +647,7 @@
       renderTable();
     });
     el.tableCsvBtn.addEventListener("click", function () {
+      flushEditor();
       if (!tableView) return;
       var csv = tableView.toCSV();
       var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
