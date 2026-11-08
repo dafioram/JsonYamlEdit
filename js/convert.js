@@ -1,8 +1,7 @@
 /*
  * Brace — convert.js
  *
- * JSON -> YAML is essentially lossless. YAML -> JSON is not, and we'd
- * rather say so plainly than let it happen quietly:
+ * Conversion previews surface known changes before replacing the source:
  *   - comments are dropped (JSON has no comment syntax)
  *   - anchors/aliases are expanded into repeated inline data
  *   - multiple '---' documents become one JSON array
@@ -17,35 +16,6 @@
 
   var Brace = global.Brace = global.Brace || {};
 
-  function countYAMLComments(text) {
-    var count = 0;
-    var lines = text.split("\n");
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var inSingle = false, inDouble = false;
-      for (var c = 0; c < line.length; c++) {
-        var ch = line[c];
-        if (ch === "'" && !inDouble) inSingle = !inSingle;
-        else if (ch === '"' && !inSingle) inDouble = !inDouble;
-        else if (ch === "#" && !inSingle && !inDouble) {
-          // A '#' only starts a comment if it's at the start of the line
-          // or preceded by whitespace (the YAML rule) — this avoids
-          // false positives on things like "url: http://x/#frag".
-          if (c === 0 || /\s/.test(line[c - 1])) {
-            count++;
-            break;
-          }
-        }
-      }
-    }
-    return count;
-  }
-
-  function countAnchors(text) {
-    var matches = text.match(/(^|[\s{,\[])&[A-Za-z0-9_-]+/g);
-    return matches ? matches.length : 0;
-  }
-
   // Recursively walks parsed data counting values that will change shape
   // under JSON.stringify: Dates -> ISO strings, Infinity/-Infinity/NaN -> null.
   function walkForLossyValues(value, counts, seen) {
@@ -55,6 +25,10 @@
     }
     if (value instanceof Date) {
       counts.dates++;
+      return;
+    }
+    if (value instanceof Uint8Array) {
+      counts.binary++;
       return;
     }
     if (seen.has(value)) return; // guard against accidental cycles
@@ -87,32 +61,18 @@
       return JSON.stringify(data, null, 2);
     },
 
-    // Builds a plain-language list of what changed. `rawYamlText` and
-    // `dupKeyIssues` are optional (pass what you have); missing inputs
-    // just mean fewer notes, never an error.
-    analyzeYamlToJson: function (rawYamlText, data, isMultiDoc, dupKeyIssues) {
-      var notes = [];
+    analyzeYamlToJson: function (data, isMultiDoc, dupKeyIssues) {
+      var notes = ["JSON output omits YAML comments and tag syntax and expands aliases into inline values."];
 
       if (isMultiDoc && Array.isArray(data)) {
         notes.push(data.length + " YAML documents (separated by \"---\") were combined into one JSON array.");
-      }
-
-      if (rawYamlText) {
-        var comments = countYAMLComments(rawYamlText);
-        if (comments > 0) {
-          notes.push(comments + " comment line" + (comments === 1 ? "" : "s") + " removed — JSON has no comment syntax.");
-        }
-        var anchors = countAnchors(rawYamlText);
-        if (anchors > 0) {
-          notes.push(anchors + " anchor" + (anchors === 1 ? "" : "s") + "/alias reference" + (anchors === 1 ? "" : "s") + " expanded into repeated inline data.");
-        }
       }
 
       if (dupKeyIssues && dupKeyIssues.length > 0) {
         notes.push(dupKeyIssues.length + " duplicate key" + (dupKeyIssues.length === 1 ? "" : "s") + " resolved to its last value (see Issues panel).");
       }
 
-      var counts = { dates: 0, nonFiniteNumbers: 0 };
+      var counts = { dates: 0, nonFiniteNumbers: 0, binary: 0 };
       walkForLossyValues(data, counts, new Set());
       if (counts.dates > 0) {
         notes.push(counts.dates + " timestamp" + (counts.dates === 1 ? "" : "s") + " converted to ISO-8601 string" + (counts.dates === 1 ? "" : "s") + ".");
@@ -121,13 +81,23 @@
         notes.push(counts.nonFiniteNumbers + " Infinity/NaN value" + (counts.nonFiniteNumbers === 1 ? "" : "s") + " became null — JSON has no representation for them.");
       }
 
-      notes.push("Any non-string mapping keys were converted to strings, matching JSON's requirement.");
+      if (counts.binary > 0) {
+        notes.push("YAML binary values become JSON objects with numbered byte properties.");
+      }
+      notes.push("JSON uses string keys and JavaScript numbers. Review the output if your YAML contains non-string keys or high-precision numbers.");
 
       return notes;
     },
 
-    analyzeJsonToYaml: function () {
-      return ["Nothing lossy here — JSON converts to YAML without any loss."];
+    analyzeJsonToYaml: function (issues) {
+      if (issues.some(function (issue) { return issue.code === "numeric-precision"; })) {
+        throw new Error("This JSON contains numbers that would change value. See Issues for the affected lines.");
+      }
+      var notes = ["Review the generated YAML before replacing your JSON."];
+      if (issues.some(function (issue) { return issue.code === "duplicate-key"; })) {
+        notes.push("Duplicate keys collapse to their last value.");
+      }
+      return notes;
     }
   };
 })(window);

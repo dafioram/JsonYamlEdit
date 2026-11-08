@@ -533,11 +533,12 @@
       try {
         var converter = window.Brace.convert;
         if (state.format === "yaml") {
-          var dupIssues = state.lintIssues.filter(function (i) { return /duplicate key/i.test(i.message); });
-          var notes = converter.analyzeYamlToJson(state.rawText, state.data, state.isMultiDoc, dupIssues);
+          var dupIssues = state.lintIssues.filter(function (i) { return i.code === "duplicate-key"; });
+          var notes = converter.analyzeYamlToJson(state.data, state.isMultiDoc, dupIssues);
           showTransformPreview(converter.toJSONText(state.data), "json", notes);
         } else {
-          showTransformPreview(converter.toYAMLText(state.data, state.isMultiDoc), "yaml", converter.analyzeJsonToYaml());
+          var jsonNotes = converter.analyzeJsonToYaml(state.lintIssues);
+          showTransformPreview(converter.toYAMLText(state.data, state.isMultiDoc), "yaml", jsonNotes);
         }
       } catch (err) {
         reportLoadProblem("Couldn't convert this document: " + err.message);

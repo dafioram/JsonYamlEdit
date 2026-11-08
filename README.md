@@ -67,9 +67,8 @@ app" button once it appears.
   empty cell. Sortable columns, a row filter, CSV export, and nested
   object/array cells collapse into a small badge you can click to peek
   inside.
-- **Convert** between JSON and YAML. JSON → YAML is lossless. YAML → JSON
-  is not, and Brace tells you exactly what changed rather than doing it
-  quietly — see "Conversion notes," below.
+- **Convert** between JSON and YAML with a preview and an undo action. Brace
+  flags duplicate keys and blocks JSON conversion if a number would change value.
 - **Linter**: flags duplicate keys (in both JSON and YAML — the *last*
   value silently wins in both formats, which is rarely what you meant) and
   YAML lines indented with tabs (invalid per the YAML spec). Issues are
@@ -92,8 +91,8 @@ for example:
   this is just what `JSON.stringify` already does with `Infinity`/`NaN`).
 - YAML timestamps become ISO-8601 strings.
 
-Going YAML → JSON never happens silently; going JSON → YAML never loses
-anything.
+Review the output before replacing the original. YAML uses a broader data
+model than JSON and the preview calls out common representation changes.
 
 ## Limits & known constraints
 
@@ -107,8 +106,8 @@ anything.
 - **Tree/Table are read-only views.** Editing happens in the Raw view;
   Tree and Table are for navigating and understanding the data. (Click
   "copy path" on a tree node to quickly locate it in the raw text.)
-- **No undo history beyond the browser's native text-edit undo** inside
-  the Raw editor (Ctrl/Cmd+Z works there as usual).
+- **Undo** uses CodeMirror history for typing and a separate action to
+  restore the text and format immediately after a conversion.
 
 ## Under the hood
 

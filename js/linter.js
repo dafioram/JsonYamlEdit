@@ -19,11 +19,30 @@
 
   // ---- JSON duplicate-key scan --------------------------------------
 
+  // Compare decimal values without expanding exponents into runs of zeros.
+  function decimalValue(token) {
+    var parts = token.toLowerCase().split("e");
+    var sign = parts[0][0] === "-" ? "-" : "";
+    var digits = parts[0].slice(sign.length).split(".");
+    var coefficient = (digits[0] + (digits[1] || "")).replace(/^0+/, "");
+    if (!coefficient) return sign + "0";
+    var trimmed = coefficient.replace(/0+$/, "");
+    var exponent = Number(parts[1] || 0) - (digits[1] || "").length + coefficient.length - trimmed.length;
+    return sign + trimmed + "e" + exponent;
+  }
+
+  function isLossyNumber(token) {
+    var n = Number(token);
+    if (!Number.isFinite(n)) return true;
+    var rendered = Object.is(n, -0) ? "-0" : String(n);
+    return decimalValue(token) !== decimalValue(rendered);
+  }
+
   // Hand-rolled single-pass tokenizer. Only tracks enough state to tell
   // "am I looking at an object key" — it does not fully validate JSON
   // (that's JSON.parse's job). Wrapped by the caller in a try/catch so a
   // weird edge case here can never take down the rest of the app.
-  function lintJSONDuplicates(text) {
+  function lintJSON(text) {
     var issues = [];
     var stack = []; // { type: 'object'|'array', seenKeys: Set, path: string }
     var i = 0;
@@ -55,6 +74,8 @@
       return text.slice(start + 1); // unterminated; best effort
     }
 
+    var numberPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+
     try {
       while (i < len) {
         var ch = text[i];
@@ -71,7 +92,8 @@
 
         if (ch === '"') {
           var strLine = line;
-          var strVal = skipString();
+          var strStart = i;
+          skipString();
 
           // Is this string a key? Peek past whitespace for ':' and make
           // sure we're directly inside an object (not an array of strings).
@@ -81,10 +103,12 @@
           }
           var top = stack[stack.length - 1];
           if (text[j] === ":" && top && top.type === "object") {
+            var strVal = JSON.parse(text.slice(strStart, i));
             if (top.seenKeys.has(strVal)) {
               issues.push({
                 severity: "warning",
                 source: "json",
+                code: "duplicate-key",
                 message: 'Duplicate key "' + strVal + '" in object at ' + top.path + " — the last value silently wins.",
                 line: strLine
               });
@@ -93,6 +117,25 @@
             }
           }
           continue;
+        }
+
+        if (ch === "-" || (ch >= "0" && ch <= "9")) {
+          numberPattern.lastIndex = i;
+          var number = numberPattern.exec(text);
+          if (number) {
+            if (isLossyNumber(number[0])) {
+              var label = number[0].length > 48 ? number[0].slice(0, 48) + "…" : number[0];
+              issues.push({
+                severity: "warning",
+                source: "json",
+                code: "numeric-precision",
+                message: "Number " + label + " cannot be preserved in the parsed views or conversion.",
+                line: line
+              });
+            }
+            i = numberPattern.lastIndex;
+            continue;
+          }
         }
 
         if (ch === "{") {
@@ -134,7 +177,7 @@
     var MAX_PASSES = 50;
     for (var pass = 0; pass < MAX_PASSES; pass++) {
       try {
-        yaml.load(working);
+        yaml.loadAll(working);
         break; // no (more) duplicate keys
       } catch (e) {
         var isDup = e && e.name === "YAMLException" && /duplicated mapping key/i.test(e.reason || e.message || "");
@@ -146,6 +189,7 @@
         issues.push({
           severity: "warning",
           source: "yaml",
+          code: "duplicate-key",
           message: "Duplicate key on line " + (mark.line + 1) + " — the last value silently wins.",
           line: mark.line + 1
         });
@@ -186,9 +230,7 @@
   // ---- Public API ------------------------------------------------------
 
   Brace.linter = {
-    lintJSON: function (text) {
-      return lintJSONDuplicates(text);
-    },
+    lintJSON: lintJSON,
     lintYAML: function (text) {
       return lintYAMLDuplicates(text).concat(lintYAMLTabs(text));
     }

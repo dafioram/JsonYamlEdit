@@ -11,29 +11,16 @@
 
   var Brace = global.Brace = global.Brace || {};
 
-  function looksLikeMultiDoc(text) {
-    return /(^|\n)---(\s|$)/.test(text);
-  }
-
   function parseJSON(text) {
     var data = JSON.parse(text); // throws with a native, fairly clear message
     return { format: "json", data: data, isMultiDoc: false };
   }
 
   function parseYAML(text) {
-    var yaml = global.jsyaml;
-    var isMultiDoc = looksLikeMultiDoc(text);
-
-    if (isMultiDoc) {
-      var docs = yaml.loadAll(text, null, { json: true });
-      // A trailing '---' with nothing after it can yield a trailing
-      // undefined/null doc; keep it only if the author put real content there.
-      return { format: "yaml", data: docs, isMultiDoc: true };
-    }
-
-    var data = yaml.load(text, { json: true });
-    if (data === undefined) data = null; // empty YAML document
-    return { format: "yaml", data: data, isMultiDoc: false };
+    var docs = global.jsyaml.loadAll(text, null, { json: true });
+    var isMultiDoc = docs.length > 1;
+    var data = isMultiDoc ? docs : docs.length ? docs[0] : null;
+    return { format: "yaml", data: data, isMultiDoc: isMultiDoc };
   }
 
   // Turns a caught error into a normalized shape the UI can render:
