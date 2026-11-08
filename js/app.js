@@ -35,6 +35,8 @@
   var pendingTransform = null;
   var undoTransform = null;
   var loadRequest = 0;
+  var pendingCSV = null;
+  var csvDelimiters = { comma: ",", semicolon: ";", tab: "\t" };
 
   function qs(id) { return document.getElementById(id); }
 
@@ -143,38 +145,76 @@
     return true;
   }
 
-  // CSV isn't really its own format in this app — it's just another way
-  // to produce an initial JSON document. Once converted, it flows through
-  // the exact same loadNew() pipeline as everything else (tree, table,
-  // linting, and further JSON<->YAML conversion all just work on it).
   function importCSVText(text, fileName) {
-    var result;
+    var csv = window.Brace.csv;
+    var delimiter = /\.tsv$/i.test(fileName || "") ? "\t" : csv.detectDelimiter(text);
+    pendingCSV = { text: text, fileName: fileName };
+    el.csvDelimiter.value = csv.DELIMITER_LABELS[delimiter];
+    el.csvHeader.value = "auto";
+    el.csvInfer.checked = true;
+    el.csvOpenRaw.hidden = /\.(csv|tsv)$/i.test(fileName || "");
+    renderCSVPreview();
+    el.csvDialog.showModal();
+    return false;
+  }
+
+  function renderCSVPreview() {
+    var csv = window.Brace.csv;
+    var delimiter = csvDelimiters[el.csvDelimiter.value];
+    el.csvApply.disabled = true;
+    el.csvPreview.textContent = "";
     try {
-      result = window.Brace.csv.parse(text);
-    } catch (e) {
-      reportLoadProblem("Couldn't parse that as CSV: " + e.message);
-      return;
+      var rows = csv.read(pendingCSV.text, delimiter, 21);
+      if (!rows.length) throw new Error("That file has no CSV records.");
+      var header = el.csvHeader.value;
+      var hadHeader = header === "yes" || (header === "auto" && csv.looksLikeHeader(rows));
+      el.csvStatus.textContent = hadHeader ? "First row will be used as column names." : "All rows will be imported as data.";
+      el.csvPreview.textContent = rows.slice(0, 5).map(function (row) {
+        return row.slice(0, 10).map(function (cell) {
+          return JSON.stringify(cell.length > 100 ? cell.slice(0, 100) + "…" : cell);
+        }).join("  |  ");
+      }).join("\n");
+      el.csvApply.disabled = false;
+    } catch (err) {
+      el.csvStatus.textContent = err.message;
     }
-    if (result.data.length === 0) {
-      reportLoadProblem("That CSV file looks empty.");
-      return;
-    }
+  }
 
-    var jsonText = JSON.stringify(result.data, null, 2);
-    var derivedName = fileName ? fileName.replace(/\.[^.]+$/, "") + ".json" : null;
-    if (!loadNew(jsonText, derivedName, "json")) return false;
+  function wireCSVImport() {
+    el.csvDelimiter.addEventListener("change", renderCSVPreview);
+    el.csvHeader.addEventListener("change", renderCSVPreview);
+    el.csvDialog.addEventListener("close", function () { pendingCSV = null; });
+    el.csvForm.addEventListener("submit", function (e) {
+      var action = e.submitter && e.submitter.value;
+      if (!pendingCSV || action === "cancel") return;
+      e.preventDefault();
+      var input = pendingCSV;
+      if (action === "raw") {
+        el.csvDialog.close();
+        loadNew(input.text, input.fileName, /^\s*[[{]/.test(input.text) ? "json" : "yaml");
+        return;
+      }
+      if (action !== "import") return;
 
-    var delimiterLabel = window.Brace.csv.DELIMITER_LABELS[result.delimiter] || ("\"" + result.delimiter + "\"");
-    var notes = [
-      "Imported " + result.rowCount + " row" + (result.rowCount === 1 ? "" : "s") +
-        " from CSV, using " + delimiterLabel + " as the delimiter.",
-      result.hadHeader
-        ? "The first row was detected as a header and used for column names."
-        : "No header row was detected, so columns were named column_1, column_2, and so on. " +
-          "If that's wrong, edit the raw JSON directly to rename them."
-    ].concat(result.columnNotes);
-    renderConversionNotes(notes, "Import notes");
-    return true;
+      try {
+        var csv = window.Brace.csv;
+        var delimiter = csvDelimiters[el.csvDelimiter.value];
+        var rows = csv.read(input.text, delimiter);
+        var result = csv.toObjects(rows, delimiter, el.csvHeader.value, el.csvInfer.checked, MAX_FILE_SIZE_BYTES);
+        var jsonText = JSON.stringify(result.data, null, 2);
+        if (bytesOf(jsonText) > MAX_FILE_SIZE_BYTES) throw new Error("The imported JSON would exceed the 5 MB editor limit.");
+        var derivedName = input.fileName ? input.fileName.replace(/\.[^.]+$/, "") + ".json" : null;
+        el.csvDialog.close();
+        loadNew(jsonText, derivedName, "json");
+        var notes = [
+          "Imported " + result.rowCount + (result.rowCount === 1 ? " row." : " rows."),
+          result.hadHeader ? "First row used as column names." : "All rows imported as data."
+        ].concat(result.columnNotes);
+        renderConversionNotes(notes, "Import notes");
+      } catch (err) {
+        el.csvStatus.textContent = err.message;
+      }
+    });
   }
 
   // Re-parse an edit to already-loaded content, strictly as the current
@@ -661,7 +701,7 @@
       var csv;
       clearLoadProblem();
       try {
-        csv = tableView.toCSV();
+        csv = tableView.toCSV(el.spreadsheetSafe.checked);
       } catch (err) {
         reportLoadProblem(err.message);
         return;
@@ -728,7 +768,8 @@
       "tabraw", "tabtree", "viewraw", "viewtree", "viewtable", "tableCollapseBtn",
       "editorTextarea", "treeContainer", "treeSearchInput", "treeExpandAllBtn", "treeCollapseAllBtn",
       "tableContainer", "tableToolbar", "tableFilterInput", "tableCsvBtn",
-      "tableScopeLabel", "tableScopeReset", "tablePopoverHost"
+      "tableScopeLabel", "tableScopeReset", "tablePopoverHost", "spreadsheetSafe",
+      "csvDialog", "csvDelimiter", "csvHeader", "csvInfer", "csvPreview", "csvStatus", "csvForm", "csvOpenRaw", "csvApply"
     ].forEach(function (id) { el[id] = qs(id); });
   }
 
@@ -739,6 +780,7 @@
     wireDropZone();
     wireFileInputs();
     wirePaste();
+    wireCSVImport();
     wireConvert();
     wireDownload();
     wireTabs();

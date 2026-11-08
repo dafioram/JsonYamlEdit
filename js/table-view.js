@@ -40,13 +40,16 @@
     return JSON.stringify(value); // objects/arrays sort by their JSON text
   }
 
-  function csvEscape(value) {
+  function csvEscape(value, spreadsheetSafe) {
     var s;
     var type = typeOf(value);
     if (value === undefined || type === "null") s = "";
     else if (type === "object" || type === "array") s = JSON.stringify(value);
     else s = String(value);
-    if (/[",\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+    if (spreadsheetSafe && type === "string" && (/^[\t\r\n]/.test(s) || /^\s*[=+@\-＝＋＠－]/u.test(s))) {
+      s = "'" + s;
+    }
+    if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
     return s;
   }
 
@@ -97,7 +100,8 @@
     if (this.sortCol !== null && this.sortDir !== 0) {
       var col = this.sortCol, dir = this.sortDir;
       rows = rows.slice().sort(function (a, b) {
-        var av = cellSortValue(a[col]), bv = cellSortValue(b[col]);
+        var av = cellSortValue(Object.prototype.hasOwnProperty.call(a, col) ? a[col] : undefined);
+        var bv = cellSortValue(Object.prototype.hasOwnProperty.call(b, col) ? b[col] : undefined);
         if (av < bv) return -1 * dir;
         if (av > bv) return 1 * dir;
         return 0;
@@ -274,14 +278,17 @@
     document.addEventListener("click", this.onOutsidePopoverClick);
   };
 
-  TableView.prototype.toCSV = function () {
+  TableView.prototype.toCSV = function (spreadsheetSafe) {
     var rows = this._filteredSortedRows();
     if (rows.length * this.columns.length > MAX_CSV_CELLS) {
       throw new Error("This CSV would exceed one million cells. Filter the rows before exporting.");
     }
-    var lines = [this.columns.map(csvEscape).join(",")];
+    var lines = [this.columns.map(function (column) { return csvEscape(column, spreadsheetSafe); }).join(",")];
     rows.forEach(function (row) {
-      lines.push(this.columns.map(function (col) { return csvEscape(row[col]); }).join(","));
+      lines.push(this.columns.map(function (col) {
+        var value = Object.prototype.hasOwnProperty.call(row, col) ? row[col] : undefined;
+        return csvEscape(value, spreadsheetSafe);
+      }).join(","));
     }, this);
     return lines.join("\n");
   };

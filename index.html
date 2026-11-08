@@ -96,6 +96,9 @@
             </span>
             <div id="tableToolbar" class="table-toolbar-controls">
               <input id="tableFilterInput" type="text" placeholder="Filter rows…" class="text-input">
+              <label title="Prefix formula-like strings with an apostrophe for spreadsheet imports">
+                <input id="spreadsheetSafe" type="checkbox" checked> Protect formulas
+              </label>
               <button id="tableCsvBtn" type="button" class="btn btn-small">Export CSV</button>
             </div>
           </div>
@@ -129,6 +132,30 @@
   <form method="dialog" class="dialog-actions">
     <button type="submit" value="cancel" class="btn" autofocus>Cancel</button>
     <button type="submit" value="apply" class="btn btn-accent">Replace editor text</button>
+  </form>
+</dialog>
+
+<dialog id="csvDialog" aria-labelledby="csvTitle">
+  <h2 id="csvTitle">Import delimited text</h2>
+  <label for="csvDelimiter">Delimiter</label>
+  <select id="csvDelimiter" class="btn btn-small">
+    <option value="comma">Comma</option>
+    <option value="semicolon">Semicolon</option>
+    <option value="tab">Tab</option>
+  </select>
+  <label for="csvHeader">Header row</label>
+  <select id="csvHeader" class="btn btn-small">
+    <option value="auto">Auto-detect</option>
+    <option value="yes">First row</option>
+    <option value="no">No header</option>
+  </select>
+  <label><input id="csvInfer" type="checkbox" checked> Infer numbers and booleans</label>
+  <p id="csvStatus" role="status"></p>
+  <pre id="csvPreview"></pre>
+  <form id="csvForm" method="dialog" class="dialog-actions">
+    <button type="submit" value="cancel" class="btn" autofocus>Cancel</button>
+    <button id="csvOpenRaw" type="submit" value="raw" class="btn">Open as text</button>
+    <button id="csvApply" type="submit" value="import" class="btn btn-accent">Import as JSON</button>
   </form>
 </dialog>
 

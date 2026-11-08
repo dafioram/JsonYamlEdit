@@ -685,3 +685,10 @@ select.btn { color-scheme: dark; }
   gap: 8px;
   padding: 4px 10px;
 }
+
+#csvPreview {
+  overflow: auto;
+  max-height: 14rem;
+  background: var(--bg);
+  padding: 8px;
+}

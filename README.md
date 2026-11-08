@@ -40,22 +40,11 @@ app" button once it appears.
   of the current file. JSON formatting preserves tokens, including number
   spelling and duplicate keys. YAML formatting rewrites parsed data, so
   review the preview if comments or source style matter.
-- **CSV/TSV import**: dropped, uploaded, or pasted CSV is converted to an
-  array of JSON objects on the way in, so it immediately gets the full
-  Tree/Table/lint/convert treatment like anything else. Header row
-  presence is auto-detected (a simplified version of the classic
-  CSV-sniffing heuristic — it compares whether the first row's cells are
-  string-typed while the columns below trend numeric/boolean); if none is
-  found, columns are named `column_1`, `column_2`, etc. Values are typed
-  where safe — numbers and `true`/`false` become real JSON types, but only
-  when the conversion round-trips exactly, so `"00501"` (a zip code) stays
-  a string instead of silently losing its leading zero. Duplicate column
-  names are auto-renamed (`name`, `name_2`) rather than overwritten. An
-  "Import notes" panel explains what was detected on each import.
-  Header detection has real limits on very small or all-text samples —
-  if it guesses wrong, the header row just shows up as an obvious first
-  data row, so it's easy to spot; editing the raw JSON directly is the
-  fix for now.
+- **CSV/TSV import** previews records before opening them as JSON. Choose
+  the delimiter and whether the first row is a header, or use the detected
+  settings. TSV starts with the tab delimiter. Turn off type inference to
+  keep fields as text. Duplicate column names are renamed, and malformed
+  quoting is reported before import.
 - **Raw editor** with syntax highlighting, line numbers, bracket matching,
   and code folding (CodeMirror), fully editable — this is the one place
   edits actually happen; Tree and Table are for browsing.
@@ -71,7 +60,9 @@ app" button once it appears.
   real-world, not-quite-uniform data — missing fields just render as an
   empty cell. Sortable columns, a row filter, CSV export, and nested
   object/array cells collapse into a small badge you can click to peek
-  inside.
+  inside. CSV export applies the current filter and sort across all pages.
+  The default formula protection prefixes formula-like text with an
+  apostrophe. Turn it off when you need the original field values.
 - **Convert** between JSON and YAML with a preview and an undo action. Brace
   flags duplicate keys and blocks JSON conversion if a number would change value.
 - **Linter**: flags duplicate keys (in both JSON and YAML — the *last*
