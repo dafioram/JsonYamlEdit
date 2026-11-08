@@ -29,6 +29,8 @@
   var tableView = null;
   var treeView = null;
   var deferredInstallPrompt = null;
+  var pendingTransform = null;
+  var undoTransform = null;
 
   function qs(id) { return document.getElementById(id); }
 
@@ -122,6 +124,7 @@
       return;
     }
 
+    setUndoTransform(null);
     state.fileName = fileName || null;
     state.tableScope = null;
     state.rawText = text;
@@ -175,6 +178,7 @@
   // format (no re-detection — we don't want editing to silently flip
   // formats on the user).
   function reparseCurrent(text) {
+    if (undoTransform && text !== state.rawText) setUndoTransform(null);
     state.rawText = text;
     try {
       var result = window.Brace.parser.parseAs(text, state.format);
@@ -479,32 +483,86 @@
 
   // ---- Toolbar actions -----------------------------------------------------
 
+  function flushEditor() {
+    editor.cancelPendingChange();
+    var text = editor.getValue();
+    if (text !== state.rawText) reparseCurrent(text);
+  }
+
+  function setUndoTransform(snapshot) {
+    undoTransform = snapshot;
+    el.undoTransformBtn.hidden = !snapshot;
+  }
+
+  function showTransformPreview(text, format, notes) {
+    var result = window.Brace.parser.parseAs(text, format);
+    pendingTransform = {
+      original: { text: editor.getValue(), format: state.format, scope: state.tableScope },
+      text: text,
+      result: result,
+      notes: notes
+    };
+    el.transformTitle.textContent = "Conversion preview";
+    el.transformNotes.replaceChildren();
+    notes.forEach(function (note) {
+      var li = document.createElement("li");
+      li.textContent = note;
+      el.transformNotes.appendChild(li);
+    });
+    el.transformText.value = text;
+    el.transformDialog.returnValue = "";
+    el.transformDialog.showModal();
+  }
+
+  function replaceDocument(text, result) {
+    state.rawText = text;
+    state.format = result.format;
+    state.data = result.data;
+    state.isMultiDoc = result.isMultiDoc;
+    state.parseError = null;
+    syncEditorFromState();
+    runLintAndRender();
+  }
+
   function wireConvert() {
     el.convertBtn.addEventListener("click", function () {
-      if (state.parseError) return; // can't convert invalid content
-      var targetFormat = state.format === "yaml" ? "json" : "yaml";
-      var notes;
-      var newText;
+      clearLoadProblem();
+      flushEditor();
+      if (state.parseError) return;
 
-      if (targetFormat === "json") {
-        var dupIssues = state.lintIssues.filter(function (i) { return /duplicate key/i.test(i.message); });
-        notes = window.Brace.convert.analyzeYamlToJson(state.rawText, state.data, state.isMultiDoc, dupIssues);
-        newText = window.Brace.convert.toJSONText(state.data);
-      } else {
-        notes = window.Brace.convert.analyzeJsonToYaml();
-        newText = window.Brace.convert.toYAMLText(state.data, state.isMultiDoc);
+      try {
+        var converter = window.Brace.convert;
+        if (state.format === "yaml") {
+          var dupIssues = state.lintIssues.filter(function (i) { return /duplicate key/i.test(i.message); });
+          var notes = converter.analyzeYamlToJson(state.rawText, state.data, state.isMultiDoc, dupIssues);
+          showTransformPreview(converter.toJSONText(state.data), "json", notes);
+        } else {
+          showTransformPreview(converter.toYAMLText(state.data, state.isMultiDoc), "yaml", converter.analyzeJsonToYaml());
+        }
+      } catch (err) {
+        reportLoadProblem("Couldn't convert this document: " + err.message);
       }
+    });
 
-      var reparsed = window.Brace.parser.parseAs(newText, targetFormat);
-      state.rawText = newText;
-      state.format = targetFormat;
-      state.data = reparsed.data;
-      state.isMultiDoc = targetFormat === "json" ? false : reparsed.isMultiDoc;
-      state.parseError = null;
+    el.transformDialog.addEventListener("close", function () {
+      var transform = pendingTransform;
+      pendingTransform = null;
+      if (!transform || el.transformDialog.returnValue !== "apply") return;
+      if (editor.getValue() !== transform.original.text || state.format !== transform.original.format) return;
+      setUndoTransform(transform.original);
+      state.tableScope = null;
+      replaceDocument(transform.text, transform.result);
+      renderConversionNotes(transform.notes);
+    });
 
-      syncEditorFromState();
-      runLintAndRender();
-      renderConversionNotes(notes);
+    el.undoTransformBtn.addEventListener("click", function () {
+      var undo = undoTransform;
+      flushEditor();
+      if (!undoTransform) return;
+      setUndoTransform(null);
+      state.tableScope = undo.scope;
+      replaceDocument(undo.text, window.Brace.parser.parseAs(undo.text, undo.format));
+      renderConversionNotes([]);
     });
   }
 
@@ -512,7 +570,7 @@
     el.downloadBtn.addEventListener("click", function () {
       var ext = state.format === "yaml" ? "yaml" : "json";
       var mime = state.format === "yaml" ? "application/yaml" : "application/json";
-      var blob = new Blob([state.rawText], { type: mime + ";charset=utf-8" });
+      var blob = new Blob([editor.getValue()], { type: mime + ";charset=utf-8" });
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
@@ -605,7 +663,8 @@
       "emptyState", "emptyError", "dropZone", "fileInput", "chooseFileBtn", "pasteBtn",
       "appShell", "appError", "openFileBtn", "formatBadge", "convertBtn", "downloadBtn", "installBtn",
       "statusLine", "issuesToggle", "issuesPanel", "issuesList",
-      "notesPanel", "notesTitle", "notesList", "notesCloseBtn",
+      "notesPanel", "notesTitle", "notesList", "notesCloseBtn", "undoTransformBtn",
+      "transformDialog", "transformTitle", "transformNotes", "transformText",
       "tabraw", "tabtree", "viewraw", "viewtree", "viewtable", "tableCollapseBtn",
       "editorTextarea", "treeContainer", "treeSearchInput", "treeExpandAllBtn", "treeCollapseAllBtn",
       "tableContainer", "tableToolbar", "tableFilterInput", "tableCsvBtn",

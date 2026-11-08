@@ -54,6 +54,7 @@
     <nav class="view-tabs">
       <button id="tabraw" type="button" class="view-tab">Raw</button>
       <button id="tabtree" type="button" class="view-tab active">Tree</button>
+      <button id="undoTransformBtn" type="button" class="btn btn-small" hidden>Undo conversion</button>
       <span id="statusLine" class="status-line"></span>
       <button id="issuesToggle" type="button" class="issues-toggle">Issues</button>
     </nav>
@@ -113,6 +114,16 @@
     </div>
   </section>
 </main>
+
+<dialog id="transformDialog" aria-labelledby="transformTitle">
+  <h2 id="transformTitle">Conversion preview</h2>
+  <ul id="transformNotes"></ul>
+  <textarea id="transformText" aria-label="Output preview" readonly rows="10" spellcheck="false"></textarea>
+  <form method="dialog" class="dialog-actions">
+    <button type="submit" value="cancel" class="btn" autofocus>Cancel</button>
+    <button type="submit" value="apply" class="btn btn-accent">Replace editor text</button>
+  </form>
+</dialog>
 
 <script src="lib/js-yaml.min.js"></script>
 <script src="lib/codemirror/codemirror.js"></script>

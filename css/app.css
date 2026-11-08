@@ -643,3 +643,26 @@ main {
     z-index: 10;
   }
 }
+
+dialog {
+  width: min(44rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog textarea {
+  width: 100%;
+  background: var(--bg);
+  color: inherit;
+  font-family: var(--font-mono);
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}

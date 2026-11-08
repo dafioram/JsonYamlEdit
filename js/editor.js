@@ -30,21 +30,36 @@
       viewportMargin: 50
     });
 
-    var debounceHandle = null;
+    this.changeTimer = null;
+    this.settingValue = false;
     this.cm.on("change", function () {
-      clearTimeout(debounceHandle);
-      debounceHandle = setTimeout(function () {
-        if (onChange) onChange(self.cm.getValue());
+      if (self.settingValue) return;
+      clearTimeout(self.changeTimer);
+      self.changeTimer = setTimeout(function () {
+        self.changeTimer = null;
+        onChange(self.getValue());
       }, 200);
     });
   }
 
   Editor.prototype.getValue = function () { return this.cm.getValue(); };
 
+  Editor.prototype.cancelPendingChange = function () {
+    clearTimeout(this.changeTimer);
+    this.changeTimer = null;
+  };
+
   Editor.prototype.setValue = function (text) {
+    this.cancelPendingChange();
     var cursor = this.cm.getCursor();
-    this.cm.setValue(text);
-    try { this.cm.setCursor(cursor); } catch (e) { /* out of range after replace; ignore */ }
+    this.settingValue = true;
+    try {
+      this.cm.setValue(text);
+      this.cm.clearHistory();
+      this.cm.setCursor(cursor);
+    } finally {
+      this.settingValue = false;
+    }
   };
 
   Editor.prototype.setMode = function (format) {
