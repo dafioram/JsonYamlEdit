@@ -666,3 +666,6 @@ dialog textarea {
   gap: 8px;
   margin-top: 10px;
 }
+
+.topbar-actions, .view-tabs { flex-wrap: wrap; }
+select.btn { color-scheme: dark; }

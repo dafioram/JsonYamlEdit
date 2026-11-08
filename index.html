@@ -24,6 +24,7 @@
   </div>
 
   <div class="topbar-actions">
+    <button id="newDocumentBtn" type="button" class="btn">New</button>
     <button id="openFileBtn" type="button" class="btn">Open file</button>
     <span id="formatBadge" class="format-badge" hidden></span>
     <button id="convertBtn" type="button" class="btn" hidden>Convert</button>
@@ -54,8 +55,14 @@
     <nav class="view-tabs">
       <button id="tabraw" type="button" class="view-tab">Raw</button>
       <button id="tabtree" type="button" class="view-tab active">Tree</button>
-      <button id="undoTransformBtn" type="button" class="btn btn-small" hidden>Undo conversion</button>
-      <span id="statusLine" class="status-line"></span>
+      <label for="formatSelect">Format</label>
+      <select id="formatSelect" class="btn btn-small">
+        <option value="json">JSON</option>
+        <option value="yaml">YAML</option>
+      </select>
+      <button id="formatBtn" type="button" class="btn btn-small">Format text</button>
+      <button id="undoTransformBtn" type="button" class="btn btn-small" hidden>Undo change</button>
+      <span id="statusLine" class="status-line" role="status"></span>
       <button id="issuesToggle" type="button" class="issues-toggle">Issues</button>
     </nav>
     <p id="appError" class="app-error" hidden></p>

@@ -54,6 +54,7 @@
   }
 
   Brace.parser = {
+    normalizeError: normalizeError,
     MAX_FILE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB — see README for rationale
 
     // Tries JSON first (strict, fast, unambiguous), then falls back to YAML

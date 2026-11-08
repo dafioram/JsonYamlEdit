@@ -13,6 +13,8 @@
 
   var state = {
     rawText: "",
+    savedText: "",
+    savedFormat: null,
     format: null,
     data: null,
     isMultiDoc: false,
@@ -31,6 +33,7 @@
   var deferredInstallPrompt = null;
   var pendingTransform = null;
   var undoTransform = null;
+  var loadRequest = 0;
 
   function qs(id) { return document.getElementById(id); }
 
@@ -88,55 +91,55 @@
     return base + "." + (state.format === "yaml" ? "yaml" : "json");
   }
 
-  // Fresh content (upload / paste / drag-drop): auto-detect format, reset
-  // table scope, switch from empty state to the app shell.
-  function loadNew(text, fileName) {
+  function formatForName(fileName) {
+    if (/\.json$/i.test(fileName || "")) return "json";
+    if (/\.ya?ml$/i.test(fileName || "")) return "yaml";
+    return null;
+  }
+
+  function parseDocument(text, format) {
+    try {
+      var result = window.Brace.parser.parseAs(text, format);
+      result.error = null;
+      return result;
+    } catch (err) {
+      return { format: format, data: null, isMultiDoc: false, error: window.Brace.parser.normalizeError(err, format) };
+    }
+  }
+
+  function loadNew(text, fileName, requestedFormat) {
     var sizeBytes = bytesOf(text);
     if (sizeBytes > MAX_FILE_SIZE_BYTES) {
       showSizeError(sizeBytes);
-      return;
+      return false;
     }
     clearLoadProblem();
 
-    var result = window.Brace.parser.detectAndParse(text);
-
-    if (result.empty) {
-      state.fileName = fileName || null;
-      reportLoadProblem("That file looks empty.");
-      return;
+    var format = requestedFormat || formatForName(fileName);
+    var result = format ? parseDocument(text, format) : window.Brace.parser.detectAndParse(text);
+    if (!format && (result.error || (result.format === "yaml" && typeof result.data === "string")) &&
+        window.Brace.csv.looksTabular(text)) {
+      return importCSVText(text, fileName);
     }
-
-    // Narrow fallback: YAML treats unindented multi-line text as one
-    // folded scalar rather than raising an error (confirmed against
-    // js-yaml directly), so genuine CSV pasted in would otherwise
-    // "succeed" as a single useless string instead of being recognized.
-    // Only kicks in when the text is clearly column-shaped.
-    var couldBeCSV = window.Brace.csv.looksTabular(text) &&
-      (result.error || (result.format === "yaml" && typeof result.data === "string"));
-    if (couldBeCSV) {
-      importCSVText(text, fileName);
-      return;
-    }
-
-    if (result.error) {
-      state.fileName = fileName || null;
-      reportLoadProblem("Couldn't parse this as JSON, YAML, or CSV: " + result.error.message);
-      return;
+    if (!result.format) {
+      var fallback = /^\s*[[{]/.test(text) ? "json" : "yaml";
+      result = parseDocument(text, fallback);
     }
 
     setUndoTransform(null);
     state.fileName = fileName || null;
     state.tableScope = null;
-    state.rawText = text;
-    state.format = result.format;
-    state.data = result.data;
-    state.isMultiDoc = result.isMultiDoc;
-    state.parseError = null;
+    state.savedText = text.replace(/\r\n?|\n/g, "\n");
+    state.savedFormat = result.format;
     state.hasLoadedOnce = true;
+    el.tableFilterInput.value = "";
+    el.issuesPanel.hidden = true;
+    renderConversionNotes([]);
 
     enterShell();
-    syncEditorFromState();
-    runLintAndRender();
+    if (result.error || requestedFormat && !fileName) setView("raw");
+    replaceDocument(text, result);
+    return true;
   }
 
   // CSV isn't really its own format in this app — it's just another way
@@ -148,19 +151,17 @@
     try {
       result = window.Brace.csv.parse(text);
     } catch (e) {
-      state.fileName = fileName || null;
       reportLoadProblem("Couldn't parse that as CSV: " + e.message);
       return;
     }
     if (result.data.length === 0) {
-      state.fileName = fileName || null;
       reportLoadProblem("That CSV file looks empty.");
       return;
     }
 
     var jsonText = JSON.stringify(result.data, null, 2);
     var derivedName = fileName ? fileName.replace(/\.[^.]+$/, "") + ".json" : null;
-    loadNew(jsonText, derivedName);
+    if (!loadNew(jsonText, derivedName, "json")) return false;
 
     var delimiterLabel = window.Brace.csv.DELIMITER_LABELS[result.delimiter] || ("\"" + result.delimiter + "\"");
     var notes = [
@@ -172,6 +173,7 @@
           "If that's wrong, edit the raw JSON directly to rename them."
     ].concat(result.columnNotes);
     renderConversionNotes(notes, "Import notes");
+    return true;
   }
 
   // Re-parse an edit to already-loaded content, strictly as the current
@@ -180,22 +182,11 @@
   function reparseCurrent(text) {
     if (undoTransform && text !== state.rawText) setUndoTransform(null);
     state.rawText = text;
-    try {
-      var result = window.Brace.parser.parseAs(text, state.format);
-      state.data = result.data;
-      state.isMultiDoc = result.isMultiDoc;
-      state.parseError = null;
-      editor.clearErrorLine();
-    } catch (err) {
-      var normalized = { message: err.message, line: null };
-      if (err && err.mark && typeof err.mark.line === "number") normalized.line = err.mark.line + 1;
-      else {
-        var m = (err.message || "").match(/line (\d+) column (\d+)/i);
-        if (m) normalized.line = parseInt(m[1], 10);
-      }
-      state.parseError = normalized;
-      editor.markErrorLine(normalized.line);
-    }
+    var result = parseDocument(text, state.format);
+    state.data = result.data;
+    state.isMultiDoc = result.isMultiDoc;
+    state.parseError = result.error;
+    editor.markErrorLine(result.error && result.error.line);
     runLintAndRender();
   }
 
@@ -204,6 +195,7 @@
     renderStatusLine();
     renderIssuesPanel();
     renderFormatBadge();
+    el.convertBtn.disabled = el.formatBtn.disabled = !!state.parseError;
 
     if (state.parseError) {
       renderTreeOrTableUnavailable("There's a syntax error in the raw text — fix it to see the tree and table views again.");
@@ -244,6 +236,7 @@
       label += " \u00B7 " + state.data.length + " documents";
     }
     el.formatBadge.textContent = label;
+    el.formatSelect.value = state.format;
     el.formatBadge.className = "format-badge format-badge-" + state.format;
     el.convertBtn.textContent = state.format === "yaml" ? "Convert to JSON" : "Convert to YAML";
     el.downloadBtn.textContent = "Download ." + (state.format === "yaml" ? "yaml" : "json");
@@ -251,7 +244,7 @@
 
   function renderIssuesPanel() {
     el.issuesList.innerHTML = "";
-    var issues = state.lintIssues;
+    var issues = state.parseError ? [{ severity: "error", message: state.parseError.message, line: state.parseError.line }] : state.lintIssues;
     el.issuesToggle.textContent = "Issues" + (issues.length ? " (" + issues.length + ")" : "");
     el.issuesToggle.classList.toggle("has-issues", issues.length > 0);
 
@@ -392,28 +385,21 @@
   // ---- File loading sources ----------------------------------------------
 
   function handleFile(file) {
-    if (/\.(csv|tsv)$/i.test(file.name)) {
-      handleCSVFile(file);
-      return;
-    }
+    var request = ++loadRequest;
     if (file.size > MAX_FILE_SIZE_BYTES) {
       showSizeError(file.size);
       return;
     }
     var reader = new FileReader();
-    reader.onload = function () { loadNew(String(reader.result), file.name); };
-    reader.onerror = function () { reportLoadProblem("Couldn't read that file."); };
-    reader.readAsText(file);
-  }
-
-  function handleCSVFile(file) {
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      showSizeError(file.size);
-      return;
-    }
-    var reader = new FileReader();
-    reader.onload = function () { importCSVText(String(reader.result), file.name); };
-    reader.onerror = function () { reportLoadProblem("Couldn't read that file."); };
+    reader.onload = function () {
+      if (request !== loadRequest) return;
+      var text = String(reader.result);
+      if (/\.(csv|tsv)$/i.test(file.name)) importCSVText(text, file.name);
+      else loadNew(text, file.name);
+    };
+    reader.onerror = function () {
+      if (request === loadRequest) reportLoadProblem("Couldn't read that file.");
+    };
     reader.readAsText(file);
   }
 
@@ -447,22 +433,30 @@
       if (el.fileInput.files && el.fileInput.files[0]) handleFile(el.fileInput.files[0]);
       el.fileInput.value = "";
     });
+    function canReplaceDocument() {
+      var dirty = state.hasLoadedOnce && (editor.getValue() !== state.savedText || state.format !== state.savedFormat);
+      return !dirty || confirm("Replace the current document? Download your edits first if you want to keep them.");
+    }
     el.openFileBtn.addEventListener("click", function () {
-      if (state.hasLoadedOnce) {
-        var ok = confirm("Load a different file? This replaces what's currently open (download it first if you want to keep it).");
-        if (!ok) return;
-      }
-      el.fileInput.click();
+      if (canReplaceDocument()) el.fileInput.click();
+    });
+    el.newDocumentBtn.addEventListener("click", function () {
+      if (!canReplaceDocument()) return;
+      ++loadRequest;
+      loadNew("{}", null, "json");
     });
   }
 
   function wirePaste() {
     if (navigator.clipboard && navigator.clipboard.readText) {
       el.pasteBtn.addEventListener("click", function () {
+        var request = ++loadRequest;
         navigator.clipboard.readText().then(function (text) {
+          if (request !== loadRequest) return;
           if (text && text.trim()) loadNew(text, null);
           else reportLoadProblem("Your clipboard doesn't seem to have any text in it.");
         }).catch(function () {
+          if (request !== loadRequest) return;
           reportLoadProblem("Couldn't read the clipboard — try pasting directly into this page instead (Ctrl/Cmd+V).");
         });
       });
@@ -476,6 +470,7 @@
       var text = (e.clipboardData || window.clipboardData).getData("text");
       if (text && text.trim()) {
         e.preventDefault();
+        ++loadRequest;
         loadNew(text, null);
       }
     });
@@ -494,7 +489,8 @@
     el.undoTransformBtn.hidden = !snapshot;
   }
 
-  function showTransformPreview(text, format, notes) {
+  function showTransformPreview(text, format, notes, title) {
+    if (bytesOf(text) > MAX_FILE_SIZE_BYTES) throw new Error("The output exceeds the 5 MB editor limit.");
     var result = window.Brace.parser.parseAs(text, format);
     pendingTransform = {
       original: { text: editor.getValue(), format: state.format, scope: state.tableScope },
@@ -502,7 +498,7 @@
       result: result,
       notes: notes
     };
-    el.transformTitle.textContent = "Conversion preview";
+    el.transformTitle.textContent = title || "Conversion preview";
     el.transformNotes.replaceChildren();
     notes.forEach(function (note) {
       var li = document.createElement("li");
@@ -519,8 +515,9 @@
     state.format = result.format;
     state.data = result.data;
     state.isMultiDoc = result.isMultiDoc;
-    state.parseError = null;
+    state.parseError = result.error || null;
     syncEditorFromState();
+    if (state.parseError) editor.markErrorLine(state.parseError.line);
     runLintAndRender();
   }
 
@@ -542,6 +539,36 @@
         }
       } catch (err) {
         reportLoadProblem("Couldn't convert this document: " + err.message);
+      }
+    });
+
+    el.formatSelect.addEventListener("change", function () {
+      var format = el.formatSelect.value;
+      if (format === state.format) return;
+      clearLoadProblem();
+      setUndoTransform(null);
+      state.format = format;
+      state.tableScope = null;
+      editor.setMode(format);
+      reparseCurrent(editor.getValue());
+    });
+
+    el.formatBtn.addEventListener("click", function () {
+      clearLoadProblem();
+      flushEditor();
+      if (state.parseError) return;
+      try {
+        var converter = window.Brace.convert;
+        if (state.format === "json") {
+          showTransformPreview(converter.formatJSON(state.rawText, MAX_FILE_SIZE_BYTES), "json",
+            ["Formatting changes whitespace and preserves the original JSON tokens."], "Format preview");
+        } else {
+          showTransformPreview(converter.toYAMLText(state.data, state.isMultiDoc, true), "yaml", [
+            "Formatting rewrites YAML from parsed values. Comments, duplicate keys, original anchor names, and scalar styles may be lost."
+          ], "Format preview");
+        }
+      } catch (err) {
+        reportLoadProblem("Couldn't format this document: " + err.message);
       }
     });
 
@@ -571,7 +598,10 @@
     el.downloadBtn.addEventListener("click", function () {
       var ext = state.format === "yaml" ? "yaml" : "json";
       var mime = state.format === "yaml" ? "application/yaml" : "application/json";
-      var blob = new Blob([editor.getValue()], { type: mime + ";charset=utf-8" });
+      var text = editor.getValue();
+      var blob = new Blob([text], { type: mime + ";charset=utf-8" });
+      state.savedText = text;
+      state.savedFormat = state.format;
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
@@ -662,7 +692,8 @@
   function grabElements() {
     [
       "emptyState", "emptyError", "dropZone", "fileInput", "chooseFileBtn", "pasteBtn",
-      "appShell", "appError", "openFileBtn", "formatBadge", "convertBtn", "downloadBtn", "installBtn",
+      "appShell", "appError", "openFileBtn", "newDocumentBtn", "formatBadge", "convertBtn", "downloadBtn", "installBtn",
+      "formatSelect", "formatBtn",
       "statusLine", "issuesToggle", "issuesPanel", "issuesList",
       "notesPanel", "notesTitle", "notesList", "notesCloseBtn", "undoTransformBtn",
       "transformDialog", "transformTitle", "transformNotes", "transformText",

@@ -34,7 +34,12 @@ app" button once it appears.
 - **Open a file** by dragging it in, using the file picker, or pasting
   JSON/YAML text directly (button, or Ctrl/Cmd+V on the empty-state
   screen). CSV/TSV files are also accepted — see below.
-- **Auto-detects JSON vs. YAML** — no need to tell it which.
+- **JSON and YAML mode** uses a known file extension and auto-detects pasted
+  content. Open malformed files in Raw and change the mode from the toolbar.
+- **New and Format text** start an empty JSON object or preview a rewrite
+  of the current file. JSON formatting preserves tokens, including number
+  spelling and duplicate keys. YAML formatting rewrites parsed data, so
+  review the preview if comments or source style matter.
 - **CSV/TSV import**: dropped, uploaded, or pasted CSV is converted to an
   array of JSON objects on the way in, so it immediately gets the full
   Tree/Table/lint/convert treatment like anything else. Header row

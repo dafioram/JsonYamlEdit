@@ -48,13 +48,38 @@
     // Produces YAML text from parsed data. `isMultiDoc` data is an array
     // of documents, dumped as separate '---'-separated YAML documents
     // rather than as one YAML document containing a top-level array.
-    toYAMLText: function (data, isMultiDoc) {
+    toYAMLText: function (data, isMultiDoc, keepRefs) {
       var yaml = global.jsyaml;
-      var opts = { lineWidth: -1, noRefs: true };
+      var opts = { lineWidth: -1, noRefs: !keepRefs };
       if (isMultiDoc && Array.isArray(data)) {
         return data.map(function (doc) { return yaml.dump(doc, opts); }).join("---\n");
       }
       return yaml.dump(data, opts);
+    },
+
+    formatJSON: function (text, limit) {
+      var tokens = /"(?:[^"\\]|\\[\s\S])*"|[{}\[\]:,]|[^\s{}\[\]:,]+/g;
+      var token;
+      var previous = "";
+      var depth = 0;
+      var length = 0;
+      var parts = [];
+      while ((token = tokens.exec(text))) {
+        var value = token[0];
+        var closes = value === "}" || value === "]";
+        var opens = previous === "{" || previous === "[";
+        if (closes) depth--;
+        var lineBreak = (opens && !closes) || previous === "," || (closes && !opens);
+        var whitespaceLength = lineBreak ? 1 + depth * 2 : previous === ":" ? 1 : 0;
+        length += whitespaceLength + value.length;
+        if (length > limit) throw new Error("The formatted output exceeds the editor limit.");
+        if (lineBreak) parts.push("\n" + "  ".repeat(depth));
+        else if (whitespaceLength) parts.push(" ");
+        parts.push(value);
+        if (value === "{" || value === "[") depth++;
+        previous = value;
+      }
+      return parts.join("");
     },
 
     toJSONText: function (data) {
